@@ -11,27 +11,20 @@ data {
  int wpos[nC,nP]; // which pos pathogens indicator
  int wneg[nC,nP]; // which neg pathogens indicator
  int indELISA; // index of ELISA assay
- int nL; // N locations
- int loc[N]; // location 
- vector[nL] NperL; // N per location
- int nA; // N age groups
- int ageG[N]; // age group 
- simplex[nA] ageProp[nL]; // proportion of study pop by age per location
- vector[nL] NperLA[nA]; // N individuals per location & age group
 
 }
 
 
 parameters {
  
- vector<lower=0,upper=1>[nPp] sero[nL,nA]; // infection prevalence
+ vector<lower=0,upper=1>[nPp] sero; // infection prevalence
  real<lower=0> sd0; // sd neg
  real<lower=0> sd1; // sd pos
  vector<lower=-1>[nP] mu0; // mean neg
  vector<lower=0>[nPp] mu1; // mean pos
  vector<lower=0>[(nP*nPp)-(nPp*2)] phi; // relative cross-reactive titer increase
  real <lower=0,upper=1> rho00; // correlation in neg titers
- real <lower=-1>muE[nPp]; // mean titers on ELISA
+ real <lower=-1> muE[nPp]; // mean titers on ELISA 
  real<lower=0> sdE[nPp+1]; // sd titers on ELISA
 
 }
@@ -43,40 +36,29 @@ transformed parameters {
   vector[nP] sigma[nC]; // gaussian sds
   vector[nC] pC[N]; // probabilities per individual & component
   vector[N] log_lik; // individual likelihoods
-  simplex[nC] theta[nL,nA]; // gaussian weights
+  simplex[nC] theta; // gaussian weights
   vector[nP] seroAll = rep_vector(0,nP); // prevalence
-  vector[nP] seroLoc[nL] = rep_array(rep_vector(0,nP),nL); // prevalence per location
-  vector[nP] seroAge[nA] = rep_array(rep_vector(0,nP),nA); // prevalence per age group
-  vector[nP] seroLocAge[nL,nA] = rep_array(rep_vector(0,nP),nL,nA); // prevalence per location & age group
   matrix[nP,nP] CR = rep_matrix(0,nP,nP); // relative cross-reactive titer increases
   cov_matrix[nP] covM[nC]; // covariance matrices
-  real mue[nC]; // mean titers on ELISA
+  real mue[nC]; // mean titers on ELISA 
   real sde[nC]; // sd titers on ELISA
   {
-  
-  // some temp variables  
-  matrix[nC,nP] W[nL,nA];
-  vector[nC] log_theta[nL,nA];
+    
+    // some temp variables
+  vector[nP] W[nC];
+  vector[nC] log_theta;
   int ix = 1;
   real cv;
   real sig;
 
-  //--- infection prevalence ---//
-  for(p in 1:nP) if(pres[p]==1) seroLocAge[,,p] = sero[,,p];
-  for(l in 1:nL) for(p in 1:nP) if(pres[p]==1) seroLoc[l,p] = sum(ageProp[l,].*to_vector(sero[l,,p]));
-  for(a in 1:nA) for(p in 1:nP) if(pres[p]==1) seroAge[a,p] = sum(NperLA[a,].*to_vector(sero[,a,p]))/sum(NperLA[a,]);
-  for(p in 1:nP) if(pres[p]==1) seroAll[p] = sum(to_vector(seroLoc[,p]).*NperL)/N;
-
-
 
   //--- gaussian weights ---//
+  seroAll[1:nPp] = sero;
   for(c in 1:nC) for(p in 1:nP){
-    if(infM[c,p]==0) for(l in 1:nL) for(a in 1:nA) W[l,a,c,p] = 1 - seroLocAge[l,a,p];
-    else for(l in 1:nL) for(a in 1:nA) W[l,a,c,p] = seroLocAge[l,a,p];
+    if(infM[c,p]==0) W[c,p] = 1 - seroAll[p];
+    else W[c,p] = seroAll[p];
   }
-  for(c in 1:nC) for(l in 1:nL) for(a in 1:nA){
-    theta[l,a,c] = prod(W[l,a,c,]);
-  } 
+  for(c in 1:nC) theta[c] = prod(W[c,]);
   log_theta = log(theta);
 
 
@@ -155,7 +137,7 @@ transformed parameters {
     for(p in 1:(nP-1)) for(p2 in (p+1):nP){ // covariances
       
       if(infM[c,p]+infM[c,p2]==2){ // pos to both
- 
+      
         covM[c,p,p2] = 0;
         covM[c,p2,p] = 0;
         
@@ -201,7 +183,7 @@ transformed parameters {
 
   
   //--- likelihood calculation ---//
-  for(c in 1:nC) for(n in 1:N) pC[n,c] = log_theta[loc[n],ageG[n],c] + multi_normal_lpdf(y[n] | mu[c], covM[c]);
+  for(c in 1:nC) for(n in 1:N) pC[n,c] = log_theta[c] + multi_normal_lpdf(y[n] | mu[c], covM[c]);
   for(n in 1:N) log_lik[n] = log_sum_exp(pC[n,]);
   
   }
@@ -211,7 +193,7 @@ transformed parameters {
 model {
  
  // priors
- for(p in 1:nPp) for(l in 1:nL) sero[l,,p] ~ beta(1,5);
+ sero ~ beta(1,5);
  mu0 ~ normal(0,0.1);
  mu1 ~ normal(3,0.1);
  sd0 ~ normal(0.4,0.05);
@@ -234,3 +216,4 @@ generated quantities {
   real sumloglik = sum(log_lik);
 
 }
+
