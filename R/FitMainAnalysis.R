@@ -156,8 +156,9 @@ write.csv(waicloo, here('Results', folder, 'WAICLOO.csv'))
 
 
 
-#--- model fits (this can take a long time & a lot of memory)
-distfits <- plot_distsLocAge(chains, data, pathogens=pathogens)
+#--- model fits (this can take a lot of time & memory if all chain iterations are used)
+# thinning of the chains can speed this up if needed
+distfits <- plot_distsLocAge(chains, data, pathogens=pathogens, NperLA=data$NperLA)
 png(filename='DistFitsV1.png', width=20, height=20, res=400, units='cm')
 plot(distfits$fit)
 dev.off()
