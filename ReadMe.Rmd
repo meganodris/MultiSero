@@ -1,6 +1,6 @@
 ---
 title: "MultiSero"
-output: html_document
+output: github_document
 ---
 
 This method uses multi-pathogen serological data to simultaneously estimate the prevalence of antibodies against each pathogen and between-pathogen cross-reactive relationships. Sources of multi-pathogen serological data can come from multiplex binding immunoassays and/or separate immunoassays (e.g. ELISAs) that have been run on the same samples. To account for cross-reactivity among related pathogens, antibodies should be measured against the same antigen across pathogens (e.g. envelope protein for flaviviruses).
