@@ -84,7 +84,7 @@ infection with pathogen B. The increase in common binding also
 proportionally increases the correlation and covariance of the
 B-positive (blue) component.
 
-$$\mu_{0,A} + \phi_{BA}*\mu_{1,B}$$ $$= 0 + 0.5*2.5$$ $$= 1.25$$
+$$\mu_{0,A} + \phi_{BA} * \mu_{1,B}$$ $$= 0 + 0.5*2.5$$ $$= 1.25$$
 
 **Scenario (iv): Cross-reactivity in both directions**
 
