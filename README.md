@@ -96,10 +96,199 @@ B) and the B-positive (blue) Gaussian component shifts right on the
 x-axis due to binding against pathogen A. The means of these components
 are calculated in the same way as scenarios (ii) and (iii).
 
-## Applying the model
+## Example application of the model
 
-The model is written in Stan and executed using cmdStan. It can be
+We will walk through an example of applying the model. In this dataset
+we have antibody measurements against 10 arbovirus antigens from a
+multiplex assay.
+
+``` r
+# read in data
+df <- read.csv(here('data', "arbovirus_serology.csv"))
+
+# define pathogens
+pathogens <- colnames(df)[3:12]
+print(pathogens)
+```
+
+    ##  [1] "DENV1" "DENV2" "DENV3" "DENV4" "JEV"   "WNV"   "TBEV"  "ZIKV"  "YFV"  
+    ## [10] "CHIKV"
+
+``` r
+# source functions 
+source(here('R', 'RFunctions.R'))
+```
+
+    ## 
+    ## Attaching package: 'emdbook'
+
+    ## The following object is masked from 'package:mvtnorm':
+    ## 
+    ##     dmvnorm
+
+We then need to specify which pathogens we assume to be present
+(i.e. those that have transmitted in the study population), versus those
+we assume to be absent. The model will see if antibody responses against
+the absent pathogens can be explained by cross-reactivity from the
+present ones. Here, we assume DENV1, CHIKV and JEV to be present and all
+other pathogens to be absent.
+
+``` r
+present <- c("DENV1","CHIKV","JEV")
+nonpres <- pathogens[!pathogens %in% present]
+pathogens <- c(present, nonpres) # reorder pathogen list with present pathogens first 
+```
+
+### Model inputs
+
+We will next compile a list of model inputs. In this example, we are
+allowing pathogen prevalence to vary by age group and location.
+
+``` r
+# create list for inputs
+data <- list()
+
+# antibody measurement data (on log scale)
+data$y <- cbind(log(df[,c(present,nonpres)])) 
+
+# index for present/absent pathogens
+data$pres <- c(rep(1,length(present)), rep(0, length(nonpres))) 
+
+# N individuals in study population
+data$N <- nrow(data$y) 
+
+# N pathogens
+data$nP <- ncol(data$y) 
+
+# N present pathogens
+data$nPp <- sum(data$pres) 
+
+# Age group index
+data$ageG <- df$ageG 
+
+# Location index
+data$loc <- df$locID 
+
+# N age groups
+data$nA <- 7 
+
+# N locations
+data$nL <- 5 
+
+# N individuals per location 
+data$NperL <- as.vector(table(df$locID)) 
+
+# N individuals per location & age
+data$NperLA <- t(table(df$locID, df$ageG)) 
+
+# Proportion of study population by age group per location
+data$ageProp <- as.matrix(table(df$locID, df$ageG) / data$NperL) 
+```
+
+We will also create some additional indices to help model computations.
+The function inf_matrix creates a matrix of all possible infection
+status combinations, given the assumed number of present pathogens. With
+3 present pathogens, there are 8 possible infection status combinations
+($2^3$) as shown in the matrix below. Here, values of 0/1 indicate being
+negative/positive and columns a-j represent each pathogen.
+
+``` r
+# Matrix of infection status combinations
+data$infM <- inf_matrix(data$nP, pres=data$pres) 
+print(data$infM)
+```
+
+    ##   a b c d e f g h i j
+    ## 1 0 0 0 0 0 0 0 0 0 0
+    ## 2 1 0 0 0 0 0 0 0 0 0
+    ## 3 0 1 0 0 0 0 0 0 0 0
+    ## 4 1 1 0 0 0 0 0 0 0 0
+    ## 5 0 0 1 0 0 0 0 0 0 0
+    ## 6 1 0 1 0 0 0 0 0 0 0
+    ## 7 0 1 1 0 0 0 0 0 0 0
+    ## 8 1 1 1 0 0 0 0 0 0 0
+
+``` r
+# N possible infection statuses
+data$nC <- nrow(data$infM) # N status combinations
+
+# N positive pathogens per infection status
+npos <- rowSums(data$infM)
+
+# Compute indices for which matrix cells are negative (wneg) or positive (wpos) 
+wpos <- matrix(0, ncol=data$nP, nrow=data$nC)
+wneg <- matrix(0, ncol=data$nP, nrow=data$nC)
+for(c in 1:nrow(data$infM)) for(p in 1:data$nP){
+  if(npos[c]>0) wpos[c,1:npos[c]] <- which(data$infM[c,]==1)
+  if(npos[c]<data$nP) wneg[c,1:(data$nP-npos[c])] <- which(data$infM[c,]==0)
+  
+}
+data$npos <- npos 
+data$wpos <- wpos 
+data$wneg <- wneg 
+```
+
+### Fit model
+
+The model is written in Stan and executed using CmdStan. For help
+setting up CmdStanR, visit this page
+(<https://mc-stan.org/cmdstanr/articles/cmdstanr.html>) The model can be
 applied to any number of pathogens, though computational time increases
-significantly as we consider more pathogens. As the number of pathogens
-is increased, the dimensions of the Gaussian components increases and
-the number of possible infection statuses also increases.
+significantly as we consider more pathogens. This is because as the
+number of pathogens is increased, the dimensions of the Gaussian
+components and the number of possible infection statuses increase.
+
+``` r
+# check cmdstan toolchain & set cmdstan path
+check_cmdstan_toolchain()
+set_cmdstan_path('C:/Users/megan/.cmdstan/cmdstan-2.35.0')
+
+# Compile the model
+mod <- cmdstan_model(here('StanModels', 'MultiSero_LocAge.stan'), pedantic=F) 
+
+# set output path
+folder <- paste(present,collapse='+')
+dir.create(here('Results', folder))
+
+# run model
+fit <- mod$sample(data=data, chains=3, parallel_chains=3, iter_sampling=3000,
+                  refresh=100, iter_warmup=3000, output_dir=here('Results', folder))
+```
+
+Once finished running, we will check model convergence diagnostics.
+
+``` r
+# extract chains
+chains <- fit$draws(format='df')
+
+# save chains
+fwrite(chains, 'Chains.csv')
+
+# look at some trace plots
+color_scheme_set("mix-blue-red")
+mcmc_trace(chains, regex_pars = c("seroAll","lp__"))
+mcmc_trace(chains, regex_pars = c("mu0","mu1"))
+mcmc_trace(chains, regex_pars = c('sd0','sd1'))
+mcmc_trace(chains, regex_pars = c('phi','rho00'))
+```
+
+And finally, extract model estimates.
+
+``` r
+# format chains as dataframe
+chains <- as.data.frame(chains)
+
+# extract prevalence estimates
+loc <- unique(df$upazila) # location names
+sero <- extract_sero(chains, data, pathogens)
+seroLoc <- extract_seroLoc(chains, data, pathogens, loc)
+seroAge <- extract_seroAge(chains, data, pathogens, ageG=c('0-9','10-19','20-29','30-39','40-49','50-59','60+'))
+seroLocAge <- extract_seroLocAge(chains, data, pathogens, loc, ageG=c('0-9','10-19','20-29','30-39','40-49','50-59','60+'))
+
+# extract cross-reactivity estimates
+phi <- extract_phi(chains, data, pathogens)
+
+# extract Gaussian means & sds
+mu <- extract_mu(chains, data, pathogens=pathogens)
+sds <- extract_sds(chains, data)
+```
