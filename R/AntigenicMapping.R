@@ -64,8 +64,8 @@ dists2$agsera <- paste(dists2$antigen, dists2$sera, sep='-')
 dists2$distance <- as.numeric(dists2$distance)
 
 
-#--- read in genetic distances from phylogenetic tree methods
-gendists <- read.csv(here('data', 'flavi_genetic_distances.csv'))
+#--- read in genetic distance estimates
+gendists <- read.csv(here('data', 'flavi_genetic_distances_EDIII.csv'))
 gd <- tidyr::gather(gendists, key='antigen2', value='distance', 2:10)
 gd$agag <- paste(gd$antigen, gd$antigen2, sep='-')
 
@@ -88,6 +88,5 @@ ggplot(dists2, aes(gendist, distance))+ geom_point()+
                   size=4, box.padding = unit(0, "lines"))
 
 # correlation in genetic and antigenic distances
-cor(dists2$distance, dists2$gendist)
-
+cor(dists2$distance, dists2$gendist, method="pearson")
 
