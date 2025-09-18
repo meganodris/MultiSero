@@ -123,8 +123,11 @@ We then need to specify which pathogens we assume to be present
 (i.e. those that have transmitted in the study population), versus those
 we assume to be absent. The model will see if antibody responses against
 the absent pathogens can be explained by cross-reactivity from the
-present ones. Here, we assume DENV1, CHIKV and JEV to be present and all
-other pathogens to be absent.
+present ones. In this example, we assume DENV1, CHIKV and JEV to be
+present and all other pathogens to be absent. In datasets where the
+status of pathogen presence/absence is not know, we suggest to conduct a
+variable (pathogen) selection process (details in O’Driscoll et al.,) to
+assess the evidence of pathogen presence.
 
 ``` r
 present <- c("DENV1","CHIKV","JEV")
