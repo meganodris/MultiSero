@@ -119,13 +119,6 @@ print(pathogens)
 source(here('R', 'RFunctions.R'))
 ```
 
-    ## 
-    ## Attaching package: 'emdbook'
-
-    ## The following object is masked from 'package:mvtnorm':
-    ## 
-    ##     dmvnorm
-
 We then need to specify which pathogens we assume to be present
 (i.e. those that have transmitted in the study population), versus those
 we assume to be absent. The model will see if antibody responses against
@@ -238,6 +231,16 @@ significantly as we consider more pathogens. This is because as the
 number of pathogens is increased, the dimensions of the Gaussian
 components and the number of possible infection statuses increase.
 
+**Note:**
+
+- As the scale of antibody measurements will vary across assays, it is
+  important to adjust model priors for the mu0, mu1, sd0 and sd1
+  parameters in the Stan file accordingly.
+
+- Setting reasonable parameter starting values for each chain when
+  running the model can help speed up model run times and improve
+  convergence.
+
 ``` r
 # check cmdstan toolchain & set cmdstan path
 check_cmdstan_toolchain()
@@ -255,7 +258,8 @@ fit <- mod$sample(data=data, chains=3, parallel_chains=3, iter_sampling=3000,
                   refresh=100, iter_warmup=3000, output_dir=here('Results', folder))
 ```
 
-Once finished running, we will check model convergence diagnostics.
+Once finished running, check chain convergence and model diagnostic
+metrics.
 
 ``` r
 # extract chains

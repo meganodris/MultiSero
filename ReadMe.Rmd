@@ -5,7 +5,6 @@ output: github_document
 
 This method uses multi-pathogen serological data to simultaneously estimate the prevalence of antibodies against each pathogen and between-pathogen cross-reactive relationships. Sources of multi-pathogen serological data can come from multiplex binding immunoassays and/or separate immunoassays (e.g. ELISAs) that have been run on the same samples. To account for cross-reactivity among related pathogens, antibodies should be measured against the same antigen across pathogens (e.g. envelope protein for flaviviruses).
 
-
 ## Concept: antibodies as multivariate Gaussian components
 
 We use a simulated example to demonstrate the model concept, where antibody titers against two pathogens, A and B, have been measured in a study population. With only two pathogens, we can characterize this data using two-dimensional Gaussian components. Assuming both pathogens have transmitted in this population there are four possible infection statuses (or antibody profiles) that we will characterize using Gaussian components:
@@ -42,6 +41,7 @@ $$\mu_{0,A} + \phi_{BA} * \mu_{1,B}$$ $$= 0 + 0.5*2.5$$ $$= 1.25$$
 In this last scenario we assume cross-reactivity in both directions, where antibodies induced from infection by each pathogen recognize the other pathogen to varying extents. The A-positive (red) Gaussian component now shifts up on the y-axis (due to binding against pathogen B) and the B-positive (blue) Gaussian component shifts right on the x-axis due to binding against pathogen A. The means of these components are calculated in the same way as scenarios (ii) and (iii).
 
 ## Example application of the model
+
 We will walk through an example of applying the model. In this dataset we have antibody measurements against 10 arbovirus antigens from a multiplex assay.
 
 ```{r, packages, include=FALSE}
@@ -58,7 +58,7 @@ library(posterior)
 library(here)
 ```
 
-```{r, read in data, warning=F}
+```{r, read in data, warning=F, message=F}
 # read in data
 df <- read.csv(here('data', "arbovirus_serology.csv"))
 
@@ -71,7 +71,8 @@ source(here('R', 'RFunctions.R'))
 
 ```
 
-We then need to specify which pathogens we assume to be present (i.e. those that have transmitted in the study population), versus those we assume to be absent. The model will see if antibody responses against the absent pathogens can be explained by cross-reactivity from the present ones. Here, we assume DENV1, CHIKV and JEV to be present and all other pathogens to be absent. 
+We then need to specify which pathogens we assume to be present (i.e. those that have transmitted in the study population), versus those we assume to be absent. The model will see if antibody responses against the absent pathogens can be explained by cross-reactivity from the present ones. Here, we assume DENV1, CHIKV and JEV to be present and all other pathogens to be absent.
+
 ```{r, define present pathogens}
 present <- c("DENV1","CHIKV","JEV")
 nonpres <- pathogens[!pathogens %in% present]
@@ -79,7 +80,9 @@ pathogens <- c(present, nonpres) # reorder pathogen list with present pathogens 
 ```
 
 ### Model inputs
+
 We will next compile a list of model inputs. In this example, we are allowing pathogen prevalence to vary by age group and location.
+
 ```{r, model inputs}
 # create list for inputs
 data <- list()
@@ -123,6 +126,7 @@ data$ageProp <- as.matrix(table(df$locID, df$ageG) / data$NperL)
 ```
 
 We will also create some additional indices to help model computations. The function inf_matrix creates a matrix of all possible infection status combinations, given the assumed number of present pathogens. With 3 present pathogens, there are 8 possible infection status combinations ($2^3$) as shown in the matrix below. Here, values of 0/1 indicate being negative/positive and columns a-j represent each pathogen.
+
 ```{r, model inputs2}
 # Matrix of infection status combinations
 data$infM <- inf_matrix(data$nP, pres=data$pres) 
@@ -149,7 +153,14 @@ data$wneg <- wneg
 ```
 
 ### Fit model
-The model is written in Stan and executed using CmdStan. For help setting up CmdStanR, visit this page (https://mc-stan.org/cmdstanr/articles/cmdstanr.html) The model can be applied to any number of pathogens, though computational time increases significantly as we consider more pathogens. This is because as the number of pathogens is increased, the dimensions of the Gaussian components and the number of possible infection statuses increase. 
+
+The model is written in Stan and executed using CmdStan. For help setting up CmdStanR, visit this page (<https://mc-stan.org/cmdstanr/articles/cmdstanr.html>) The model can be applied to any number of pathogens, though computational time increases significantly as we consider more pathogens. This is because as the number of pathogens is increased, the dimensions of the Gaussian components and the number of possible infection statuses increase.
+
+**Note:**
+
+-   As the scale of antibody measurements will vary across assays, it is important to adjust model priors for the mu0, mu1, sd0 and sd1 parameters in the Stan file accordingly.
+
+-   Setting reasonable parameter starting values for each chain when running the model can help speed up model run times and improve convergence.
 
 ```{r, fit model, eval=FALSE}
 # check cmdstan toolchain & set cmdstan path
@@ -169,7 +180,8 @@ fit <- mod$sample(data=data, chains=3, parallel_chains=3, iter_sampling=3000,
 
 ```
 
-Once finished running, we will check model convergence diagnostics.
+Once finished running, check chain convergence and model diagnostic metrics.
+
 ```{r, check convergence, eval=F}
 # extract chains
 chains <- fit$draws(format='df')
@@ -187,6 +199,7 @@ mcmc_trace(chains, regex_pars = c('phi','rho00'))
 ```
 
 And finally, extract model estimates.
+
 ```{r, model outputs, eval=F}
 
 # format chains as dataframe
