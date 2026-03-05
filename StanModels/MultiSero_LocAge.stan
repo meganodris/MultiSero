@@ -142,7 +142,7 @@ transformed parameters {
     for (c in 1 : nC) {
       for (p in 1 : nP)
         covM[c, p, p] = sigma[c, p] ^ 2;
-      for (p in 1 : (nP - 1)) {
+      for (p in 1 : (nP)) {
         for (p2 in (p + 1) : nP) {
           if (infM[c, p] + infM[c, p2] == 2) {
             cv = 0;
