@@ -462,3 +462,193 @@ plot_distsLocAge <- function(chains, data, pathogens, NperLA){
   return(list(fit=fitD,fitPN=fitDPN)) 
 }
 
+
+
+#----- Plot posterior estimates of params
+plot_posterior = function(
+  chains,
+  data,
+  pathogens,
+  real_pars = NULL,
+  real_CR = NULL
+) {
+  phi <- extract_phi(chains, data, pathogens)
+  sero <- extract_sero(chains, data, pathogens)
+  mu <- extract_mu(chains, data, pathogens)
+  sds <- extract_sds(chains, data)
+
+  mu0 = mu$mus0 %>%
+    filter(pos == "neg") %>%
+    mutate(
+      par = " Mean negative\ntiter (Mu 0)",
+      idx = pathogens
+    ) %>%
+    select(par, med, ciL, ciU, idx)
+
+  mu1 = mu$mus1 %>%
+    filter(pos == antigen) %>%
+    mutate(
+      par = 'Mean positive\ntiter (Mu 1)',
+      idx = present
+    ) %>%
+    select(par, med, ciL, ciU, idx)
+
+  sdss = sds %>%
+    mutate(
+      par = "Std. dev.",
+      idx = c("Sd0", "Sd1")
+    ) %>%
+    select(par, med, ciL, ciU, idx)
+
+  phis = phi$phi %>%
+    mutate(
+      par = "Cross-reactivity (Phi)",
+      idx = paste0(pos, " to\n", neg)
+    ) %>%
+    select(par, med, ciL, ciU, idx)
+
+  seros = sero %>%
+    mutate(
+      par = "Seroprevalence",
+      idx = present
+    ) %>%
+    select(par, med, ciL, ciU, idx)
+
+  if (!is.null(real_pars)) {
+    mu0 = mu0 %>% mutate(real = real_pars$true[real_pars$pars == "mu0"])
+    mu1 = mu1 %>%
+      mutate(
+        real = real_pars$true[
+          real_pars$pars == "mu1" & real_pars$pathogen %in% c("A", "B")
+        ] +
+          real_pars$true[
+            real_pars$pars == "mu0" & real_pars$pathogen %in% c("A", "B")
+          ],
+      )
+    sdss = sdss %>%
+      mutate(
+        real = real_pars$true[
+          real_pars$pars %in% c("sd0", "sd1") & real_pars$pathogen %in% c("A")
+        ]
+      )
+    colnames(real_cr$CR) = rownames(real_cr$CR) = pathogens
+    phis = phis %>%
+      mutate(real = diag(real_cr$CR[phi$phi$pos, phi$phi$neg]))
+    seros = seros %>%
+      mutate(real = real_pars$true[real_pars$pars == "sero"][1:2])
+  }
+
+  p = rbind(mu0, mu1, sdss, phis, seros) %>%
+    mutate(idx = as.factor(idx)) %>%
+    ggplot() +
+    geom_pointrange(aes(x = idx, y = med, ymin = ciL, ymax = ciU)) +
+    facet_wrap(~par, scales = "free") +
+    theme_minimal(base_size = 25) +
+    xlab("Index") +
+    ylab("")
+
+  if (!is.null(real_pars)) {
+    p = p + geom_point(aes(x = idx, y = real), col = 2)
+  }
+
+  return(p)
+}
+
+
+
+#----- BREAD data formatting
+format_data <- function (
+  data,
+  present, nonpres,
+  ageG = 0, # 1 if age groups included
+  locID = 0 # 1 if location IDs included
+) {
+  # create list for inputs
+  data <- list()
+  
+  # antibody measurement data (on log scale)
+  data$y <- cbind(log(df[, c(present, nonpres)]))
+  
+  # index for present/absent pathogens
+  data$pres <- c(rep(1, length(present)), rep(0, length(nonpres)))
+  
+  # N individuals in study population
+  data$N <- nrow(data$y)
+  
+  # N pathogens
+  data$nP <- ncol(data$y)
+  
+  # N present pathogens
+  data$nPp <- sum(data$pres)
+  
+  # Covar selection
+  if(ageG == 1 & locID == 1){ # both age and location
+    
+    # Age group index
+    data$ageG <- df$ageG
+    # Location index
+    data$loc <- df$locID
+    # N age groups
+    data$nA <- length(unique(df$ageG)) #7
+    # N locations
+    data$nL <- length(unique(df$locID)) #5
+    # N individuals per location
+    data$NperL <- as.vector(table(df$locID))
+    # N individuals per location & age
+    data$NperLA <- table(df$ageG, df$locID)
+    # Proportion of study population by age group per location
+    data$ageProp <- as.matrix(table(df$locID, df$ageG) / data$NperL)
+    
+  } else if (ageG == 0 & locID == 0) { # no strata
+    
+    data$ageG <- rep(1, data$N)
+    data$loc <- rep(1, data$N)
+    data$nA <- 1
+    data$nL <- 1
+    data$NperL <- as.matrix(data$N)
+    data$NperLA <- as.matrix(data$N)
+    data$ageProp <- as.matrix(1)
+    
+  } else if (ageG == 1 & locID == 0) { # age group only
+    
+    data$ageG <- df$ageG
+    data$loc <- rep(1, data$N)
+    data$nA <- length(unique(df$ageG))
+    data$nL <- 1
+    data$NperL <- as.matrix(data$N)
+    data$NperLA <- as.matrix(table(df$ageG))
+    data$ageProp <- as.matrix(table(df$ageG) / data$N)
+      
+  } else if (ageG == 0 & locID == 1) { # location only
+    
+    data$ageG <- rep(1, data$N)
+    data$loc <- df$locID
+    data$nA <- 1
+    data$nL <- length(unique(data$locID))
+    data$NperL <- as.vector(table(df$locID))
+    data$NperLA <- as.matrix(table(df$ageG))
+    data$ageProp <- as.matrix(1)
+    
+  }
+  # Matrix of infection status combinations
+  data$infM <- inf_matrix(data$nP, pres = data$pres)
+  
+  # N possible infection statuses
+  data$nC <- nrow(data$infM) # N status combinations
+  
+  # N positive pathogens per infection status
+  npos <- rowSums(data$infM)
+  
+  # Compute indices for which matrix cells are negative (wneg) or positive (wpos)
+  wpos <- matrix(0, ncol = data$nP, nrow = data$nC)
+  wneg <- matrix(0, ncol = data$nP, nrow = data$nC)
+  for (c in 1:nrow(data$infM)) for (p in 1:data$nP){
+    if (npos[c] > 0) wpos[c, 1:npos[c]] <- which(data$infM[c, ] == 1)
+    if (npos[c] < data$nP) wneg[c, 1 :(data$nP - npos[c])] <- which(data$infM[c, ] == 0)
+  }
+  data$npos <- npos
+  data$wpos <- wpos
+  data$wneg <- wneg
+  
+  return(data)
+}
