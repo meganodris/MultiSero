@@ -872,7 +872,7 @@ get_posterior = function(
       geom_point(
         aes(x = idx, y = real),
         col = 2,
-        size = 2,
+        size = 3,
         position = position_nudge(x = 0.2)
       )
     tab = tab %>% relocate(par, real)
