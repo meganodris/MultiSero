@@ -791,39 +791,44 @@ get_posterior = function(
   mu0 = mu$mus0 %>%
     filter(pos == "neg") %>%
     mutate(
-      par = " Mean negative\ntiter (Mu 0)",
+      par_label = " Mean negative\ntiter (Mu 0)",
+      par = paste0("mu0 ", pathogens),
       idx = pathogens
     ) %>%
-    select(par, med, ciL, ciU, idx)
+    select(par, par_label, med, ciL, ciU, idx)
 
   mu1 = mu$mus1 %>%
     filter(pos == antigen) %>%
     mutate(
-      par = 'Mean positive\ntiter (Mu 1)',
+      par_label = 'Mean positive\ntiter (Mu 1)',
+      par = paste0("mu1 ", present),
       idx = present
     ) %>%
-    select(par, med, ciL, ciU, idx)
+    select(par, par_label, med, ciL, ciU, idx)
 
   sdss = sds %>%
     mutate(
-      par = "Std. dev.",
+      par_label = "Std. dev.",
+      par = c("Sd0", "Sd1"),
       idx = c("Sd0", "Sd1")
     ) %>%
-    select(par, med, ciL, ciU, idx)
+    select(par, par_label, med, ciL, ciU, idx)
 
   phis = phi$phi %>%
     mutate(
-      par = "Cross-reactivity (Phi)",
+      par_label = "Cross-reactivity (Phi)",
+      par = paste0("Phi ", pos, " to ", neg),
       idx = paste0(pos, " to\n", neg)
     ) %>%
-    select(par, med, ciL, ciU, idx)
+    select(par, par_label, med, ciL, ciU, idx)
 
   seros = sero %>%
     mutate(
-      par = "Seroprevalence",
+      par_label = "Prevalence",
+      par = paste0("Prev ", present),
       idx = present
     ) %>%
-    select(par, med, ciL, ciU, idx)
+    select(par, par_label, med, ciL, ciU, idx)
 
   if (!is.null(real_pars)) {
     mu0 = mu0 %>% mutate(real = real_pars$true[real_pars$pars == "mu0"])
@@ -855,13 +860,22 @@ get_posterior = function(
     mutate(idx = as.factor(idx)) %>%
     ggplot() +
     geom_pointrange(aes(x = idx, y = med, ymin = ciL, ymax = ciU)) +
-    facet_wrap(~par, scales = "free") +
-    theme_minimal(base_size = 15) +
+    facet_wrap(~par_label, scales = "free") +
     xlab("Index") +
-    ylab("")
+    ylab("") +
+    theme(axis.text.x = element_text(angle = 90, vjust = 0.5, hjust = 1))
+
+  tab = tab %>% select(-c(par_label, idx))
 
   if (!is.null(real_pars)) {
-    p = p + geom_point(aes(x = idx, y = real), col = 2)
+    p = p +
+      geom_point(
+        aes(x = idx, y = real),
+        col = 2,
+        size = 2,
+        position = position_nudge(x = 0.2)
+      )
+    tab = tab %>% relocate(par, real)
   }
 
   return(list(table = tab, plot = p))
@@ -1438,4 +1452,52 @@ sim_multisero <- function(
     covs = covs,
     Qcovs = Qcovs
   ))
+}
+
+
+relabel_chains <- function(chains, pathogens, present) {
+  # general pars
+  label_map <- c(
+    "sd0" = "Std. dev. (negative)",
+    "sd1" = "Std. dev. (positive)",
+    "rho00" = "Rho",
+    "lp__" = "Likelihood"
+  )
+  # mus - pathogen specific
+  label_map <- c(
+    label_map,
+    setNames(
+      paste0("Seroprev: ", pathogens),
+      paste0("seroAll[", seq_along(pathogens), "]")
+    ),
+    setNames(
+      paste0("Mu0: ", pathogens),
+      paste0("mu0[", seq_along(pathogens), "]")
+    ),
+    setNames(paste0("Mu1:", present), paste0("mu1[", seq_along(present), "]"))
+  )
+  # phi labels - present * pathogens
+  phi_map <- c()
+  phi_idx <- 1
+  for (p in seq_along(present)) {
+    for (p2 in seq_along(pathogens)) {
+      if (p2 != p) {
+        phi_name <- paste0("phi[", phi_idx, "]")
+        phi_map[phi_name] <- paste0("Phi: ", present[p], " to\n", pathogens[p2])
+        phi_idx <- phi_idx + 1
+      }
+    }
+  }
+
+  label_map <- c(
+    label_map,
+    phi_map[intersect(names(phi_map), colnames(chains))]
+  )
+
+  pars <- names(label_map)
+  trace_df <- chains |>
+    select(.chain, .iteration, .draw, all_of(pars)) |>
+    rename_with(~ unname(label_map[.x]), .cols = all_of(pars))
+
+  return(trace_df)
 }
