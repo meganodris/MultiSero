@@ -1467,7 +1467,7 @@ relabel_chains <- function(chains, pathogens, present) {
   label_map <- c(
     label_map,
     setNames(
-      paste0("Seroprev: ", pathogens),
+      paste0("Prev: ", pathogens),
       paste0("seroAll[", seq_along(pathogens), "]")
     ),
     setNames(
