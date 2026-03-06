@@ -1,0 +1,185 @@
+---
+title: "MultiSero Tutorial - Malaria Example"
+author: "Madiha Shafquat"
+date: "`r Sys.Date()`"
+output:
+ html_document:
+  toc: true
+  toc_float:
+   toc_collapsed: true
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(
+  comment = "#>"
+)
+```
+
+Here we will use MultiSero to analyze data from the COMSA cross-sectional cohort in Mozambique.
+Each individual in the dataset has antibody measurements against MSP1-19 antigens from _P. falciparum_, _P. malariae_, _P. ovale_, and _P. vivax_, measured on a multi-antigen Luminex assay.
+Our primary outputs of interest are _Plasmodium_ species-specific seroprevalence and cross-reactivity estimates ($\phi$) for each combination of species.
+
+# Set up
+```{r message = FALSE, warning = FALSE}
+# Required packages for this tutorial
+library(here)           # File path management
+library(data.table)     # Fast data manipulation
+library(tidyverse)      # Data wrangling and visualization (includes ggplot2, dplyr, tidyr)
+library(GGally)         # Extension to ggplot2 for pairwise plots
+library(bayesplot)      # Visualization of Bayesian models and diagnostics
+
+theme_set(theme_bw())
+
+# source functions
+source(here("R", "RFunctions.R"))
+```
+
+## Data pre-processing
+For input into MultiSero, data should be in wide format, with one row per individual and one column per antigen.
+The COMSA data has been pre-processed using BREAD and is available as normalized MFI values in long format.
+t present, it is possible for BREAD to output MFIs that are below 0, but our model uses measurements on the log scale. Here we will only include inviduals with measurements > 0, but a different approach could also be appropriate depending on the dataset.
+```{r}
+# read in data
+bread_raw <- read.csv(here("data", "BREAD_COMSA_output.csv")) |>
+ filter(
+  # only include antigens/pathogens of interest
+  Antigen %in% c("pfmsp119_ls", "pmmsp119_ls", "pomsp119_ls", "pvmsp119_ls"),
+  # keep strictly positive values
+  Norm_MFI > 0
+ )
+head(bread_raw) |> knitr::kable()
+
+df <- bread_raw |>
+ # convert from long to wide format
+ pivot_wider(
+  id_cols = Sample, # sample ID
+  names_from = Antigen, # antigen names become columns
+  values_from = Norm_MFI # MFI values
+ ) |>
+ # rename antigen columns as desired to be more informative
+ rename(
+  P.falciparum = pfmsp119_ls,
+  P.malariae = pmmsp119_ls,
+  P.ovale = pomsp119_ls,
+  P.vivax = pvmsp119_ls
+ ) |>
+ # remove rows with missing values created during pivoting/filtering
+ drop_na()
+
+head(df) |> knitr::kable()
+```
+
+Now that our data is ready, we define which pathogens are expected to be circulating in the population and are thus potential exposures.
+In this setting, we expect _P. falciparium_, _P. malariae_, and _P. ovale_ to be present and _P. vivax_ to be absent.
+If pathogen presence/absence is uncertain, we recommend a variable pathogen selection process (see [O'Driscoll et al.](https://doi.org/10.1126/scitranslmed.ads8680)).
+```{r}
+# define pathogen columns
+pathogens <- colnames(df)[2:5]
+
+present <- c("P.falciparum", "P.malariae", "P.ovale") # Pathogens assumed to be circulating
+nonpres <- pathogens[!pathogens %in% present]         # Pathogens assumed absent
+
+# reorder pathogen list with present pathogens first
+pathogens <- c(present, nonpres)
+
+# final data format
+data <- format_data(
+ df = df,
+ present = present,
+ nonpres = nonpres,
+ ageG = FALSE,            # Age group indicator - TRUE if we want to stratify by age group
+ locID = FALSE,           # Location indicator - TRUE if we want to stratify by location
+ log_tranform = TRUE     # Whether titers need to be log-transformed
+)
+```
+
+# Fit model
+## Set priors
+Before fitting, choose priors informed by the scale and distribution of your assay data, since multimodal posteriors are possible in this model.
+```{r fig.width = 5}
+ggpairs(log10(df[2:5]))
+```
+
+In this dataset, MFIs for all pathogens show a lower-density region near 3 and a higher peak close to 9 for _P. falciparum_, so we choose priors that are compatible with those ranges.
+These priors are shared across pathogens. If diagnostics (see below section) suggest poor convergence, consider adjusting priors before refitting.
+
+Priors for each model parameter follow a pre-specified distribution (see [O'Driscoll et al.](https://doi.org/10.1126/scitranslmed.ads8680)).
+```{r}
+priors <- list(
+ mu0_mean = 3, mu0_sd = 0.1,    # Negative titers (normal distribution)
+ mu1_mean = 3, mu1_sd = 0.5,    # Positive titers (normal distribution)
+ sd0_mean = 1.5, sd0_sd = 0.05, # SD of negative titers (normal distribution)
+ sd1_mean = 2, sd1_sd = 0.05,   # SD of positive titers (normal distribution)
+ phi_rate = 8,                  # Cross-reactivity (exponential distribution)
+ rho_a = 2, rho_b = 2           # Correlation (beta distribution)
+)
+```
+
+## Set up cmdstanr
+The model fitting is done in cmdstanr. Resources for setting up `cmdstanr` can be found [here](https://mc-stan.org/cmdstanr/articles/cmdstanr.html).
+```{r}
+library(cmdstanr)
+# check cmdstan toolchain & set cmdstan path if needed
+check_cmdstan_toolchain()
+```
+
+## Run MCMC
+```{r}
+# Compile the model
+mod <- cmdstan_model(here("StanModels", "MultiSero_LocAge.stan"), pedantic = FALSE)
+
+# Set output path
+folder <- "comsa_mps119_res" # output subdirectory within Results/
+```
+
+```{r eval = FALSE}
+dir.create(here("Results", folder))
+
+# run model
+fit <- mod$sample(
+ data = c(data, priors),
+ chains = 3,
+ parallel_chains = 3,
+ iter_sampling = 3000,
+ refresh = 100,
+ iter_warmup = 3000,
+ output_dir = here("Results", folder)
+)
+```
+
+```{r  include = FALSE}
+# to avoid re-running, read in previously fit chains
+output_dir <-  here("Results", folder)
+fit <- as_cmdstan_fit(list.files(output_dir, pattern = "\\.csv$", full.names = TRUE))
+```
+
+## Check MCMC diagnostics
+We use `bayesplot` diagnostics to check that chains mix well and converge to a common posterior distribution. Note that the estimated prevalence and $\mu_1$ for _P. vivax_ is set at 0 as it is not assumed to be present.
+```{r fig.width = 9, fig.height = 5}
+# extract posterior draws
+chains <- fit$draws(format = "df")
+
+trace_df <- relabel_chains(chains = chains, pathogens, present)
+
+color_scheme_set("mix-blue-red")
+
+# Examine trace plots for key parameter groups
+mcmc_trace(trace_df, pars = vars(starts_with("Prev"), "Likelihood"))
+mcmc_trace(trace_df, pars = vars(starts_with(c("Mu", "Std"))))
+mcmc_trace(trace_df, pars = vars(starts_with("Phi"), "Rho"))
+```
+In this run, chains appear well mixed and converged. If not, increase iterations and/or revisit priors.
+
+# Extract model estimates
+Once diagnostics are acceptable, we can summarize posterior estimates.
+```{r fig.width = 7, fig.height = 5}
+posteriors <- get_posterior(as.data.frame(chains), data, pathogens)
+posteriors$plot
+posteriors$table |> knitr::kable(digits = 3)
+```
+
+Looking first at prevalence, estimated exposure is highest for _P. falciparum_ (median 0.840, 95% CrI 0.811-0.868), and much lower for the other two circulating strains: _P. malariae_ (0.158, 0.130-0.190) and _P. ovale_ (0.094, 0.073-0.119). 
+These values can be interpreted as posterior probabilities of prior exposure in the sampled population, with credible intervals quantifying uncertainty.
+
+The $\phi$ parameters describe how exposure to one species is expected to contribute to the antigen level of another speices.
+We see modest cross-reactivity from exposure to _P. falciparum_ on the antibody level of _P. malariae_ ($\phi$ = 0.150 [0.131-0.168]), _P. ovale_ ($\phi$ = 0.131 [0.112-0.148]), and _P. vivax_ _P. ovale_ ($\phi$ = 0.131 [0.114-0.148]).
